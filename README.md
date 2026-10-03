@@ -4,7 +4,7 @@ Zero-downtime rolling deploys for Docker Compose on a single host: an Envoy
 proxy in front of each service and health-gated bounces, as a Docker CLI plugin.
 
 <p align="center">
-  <img src="docs/bounce-crossover.svg" width="760" alt="Animation: crossover with three replicas. app-4 (v2) starts, joins Envoy's list and turns healthy, then app-1 (v1) leaves the list, finishes its in-flight requests and is removed; app-5 and app-6 replace app-2 and app-3 the same way. Three replicas serve throughout and at most four exist.">
+  <img src="docs/how-it-works.svg" width="720" alt="Animation: the api proxy (Envoy) sends traffic to replica api-app-1 running v1. A new replica api-app-2 running v2 starts, becomes healthy and joins Envoy's list; api-app-1 is taken off the list, finishes its in-flight requests and is removed.">
 </p>
 
 ## Why
@@ -63,7 +63,7 @@ docker bouncer undo      # bounces back to registry/app:1.0
 ## How it works
 
 <p align="center">
-  <img src="docs/how-it-works.svg" width="720" alt="Animation: the api proxy (Envoy) sends traffic to replica api-app-1 running v1. A new replica api-app-2 running v2 starts, becomes healthy and joins Envoy's list; api-app-1 is taken off the list, finishes its in-flight requests and is removed.">
+  <img src="docs/bounce-crossover.svg" width="760" alt="Animation: crossover with three replicas. app-4 (v2) starts, joins Envoy's list and turns healthy, then app-1 (v1) leaves the list, finishes its in-flight requests and is removed; app-5 and app-6 replace app-2 and app-3 the same way. Three replicas serve throughout and at most four exist.">
 </p>
 
 Each Service `api` becomes an Envoy proxy named `api` (it keeps the ports,
