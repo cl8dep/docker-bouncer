@@ -68,7 +68,9 @@ docker bouncer undo      # bounces back to registry/app:1.0
 
 Each Service `api` becomes an Envoy proxy named `api` (it keeps the ports,
 networks and aliases) plus replicas `api-app`. Bouncer drives the proxy with
-`docker exec`, rewriting its cluster list and reading its health checks. A
+`docker exec`, rewriting its cluster list and reading its health checks. The
+proxy appends the caller's address to `X-Forwarded-For` and keeps an incoming
+`X-Forwarded-Proto`. A
 lock container `<project>-bouncer-lock`, created but never started, keeps two
 runs apart.
 
