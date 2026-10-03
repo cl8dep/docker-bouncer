@@ -21,23 +21,18 @@ proxy in front of each service and health-gated bounces, as a Docker CLI plugin.
 
 ## Install
 
-From a release. Assets are named `docker-bouncer-<os>-<arch>` for
-`linux` and `darwin`, `amd64` and `arm64`; set `bin` to yours. On macOS use
-`shasum -a 256 -c` instead of `sha256sum -c`.
+Linux or macOS, amd64 or arm64; downloads the latest release as a Docker CLI plugin:
 
 ```sh
-v=vX.Y.Z; bin=docker-bouncer-linux-arm64
-mkdir -p ~/.docker/cli-plugins && (
-  cd ~/.docker/cli-plugins &&
-  curl -fsSLO https://github.com/cuza/docker-bouncer/releases/download/$v/$bin &&
-  curl -fsSLO https://github.com/cuza/docker-bouncer/releases/download/$v/SHA256SUMS &&
-  sha256sum -c --ignore-missing SHA256SUMS &&
-  mv $bin docker-bouncer && chmod +x docker-bouncer && rm SHA256SUMS
-)
+mkdir -p ~/.docker/cli-plugins
+curl -fsSL -o ~/.docker/cli-plugins/docker-bouncer \
+  "https://github.com/cuza/docker-bouncer/releases/latest/download/docker-bouncer-$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
+chmod +x ~/.docker/cli-plugins/docker-bouncer
 docker bouncer --help
 ```
 
-From source: `go build -o ~/.docker/cli-plugins/docker-bouncer .`
+Checksums are in each release's `SHA256SUMS`. From source:
+`go build -o ~/.docker/cli-plugins/docker-bouncer .`
 
 ## Quick start
 
