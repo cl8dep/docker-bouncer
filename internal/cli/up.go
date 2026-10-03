@@ -286,6 +286,7 @@ func prePull(ctx context.Context, l *loaded, svcs types.Services, override strin
 	for _, n := range names {
 		s := svcs[n]
 		s.PullPolicy = types.PullPolicyAlways // Compose skips missing/never services otherwise
+		s.DependsOn = nil                     // the dependencies are not in this project
 		p.Services[n] = s
 	}
 	if lockImage := proxyImage(l); override != types.PullPolicyNever && !images[lockImage] && !present(ctx, lockImage) {

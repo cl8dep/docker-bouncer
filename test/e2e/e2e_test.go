@@ -776,3 +776,71 @@ func TestProgressJSON(t *testing.T) {
 		t.Fatalf("no Converged event for api:\n%s", out)
 	}
 }
+
+// A Service depending on another starts, bounces each side, and stops before
+// the other's proxy and replicas.
+func TestDependsOnBetweenBouncerServices(t *testing.T) {
+	port := freePort(t)
+	p := project(t, fmt.Sprintf(`
+services:
+  api:
+    image: bouncer-e2e-app:v1
+    expose: ["8080"]
+    x-bouncer: { %[2]s }
+  web:
+    image: bouncer-e2e-app:v1
+    depends_on: [api]
+    ports: ["127.0.0.1:%[1]d:8080"]
+    x-bouncer: { %[2]s, drain_method_params: { delay: 2s } }
+`, port, fast))
+	p.mustUp()
+	before := p.replicas("api")
+	stop := make(chan struct{})
+	res := load(t, url(port, "/"), stop)
+	// Bounce web only; the scoped up also selects api-app but must not bounce it.
+	p.write(strings.Replace(p.yaml, "image: bouncer-e2e-app:v1\n    depends_on", "image: bouncer-e2e-app:v2\n    depends_on", 1))
+	if out, code := p.bouncer("up", "web"); code != 0 {
+		t.Fatalf("bounce web: %d\n%s", code, out)
+	}
+	close(stop)
+	if r := <-res; r.failures != 0 || r.total == 0 {
+		t.Fatalf("%d failed requests out of %d: %v", r.failures, r.total, r.samples)
+	}
+	if img := p.images("web"); img["bouncer-e2e-app:v2"] != 1 || len(img) != 1 {
+		t.Fatalf("web replicas %v", img)
+	}
+	if got := p.replicas("api"); !slices.Equal(got, before) {
+		t.Fatalf("up web bounced api: %v -> %v", before, got)
+	}
+	p.write(strings.Replace(p.yaml, ":v1", ":v2", 1))
+	if out, code := p.bouncer("up"); code != 0 {
+		t.Fatalf("bounce api: %d\n%s", code, out)
+	}
+	if img := p.images("api"); img["bouncer-e2e-app:v2"] != 1 || len(img) != 1 {
+		t.Fatalf("api replicas %v", img)
+	}
+	if out, code := p.bouncer("stop"); code != 0 {
+		t.Fatalf("stop: %d\n%s", code, out)
+	}
+	finished := func(ids ...string) (first, last time.Time) {
+		for _, id := range ids {
+			f, err := time.Parse(time.RFC3339Nano, docker(t, "inspect", "-f", "{{.State.FinishedAt}}", id))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if first.IsZero() || f.Before(first) {
+				first = f
+			}
+			if f.After(last) {
+				last = f
+			}
+		}
+		return first, last
+	}
+	_, webLast := finished(p.replicas("web")...)
+	apiFirst, _ := finished(append(p.replicas("api"), p.proxy("api"))...)
+	t.Logf("web replicas stopped by %s, api proxy and replicas from %s", webLast.Format(time.StampMicro), apiFirst.Format(time.StampMicro))
+	if !webLast.Before(apiFirst) {
+		t.Fatal("web replicas must stop before api's proxy and replicas")
+	}
+}

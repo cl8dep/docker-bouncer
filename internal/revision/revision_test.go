@@ -341,3 +341,15 @@ func TestHistoryBudgetTrims(t *testing.T) {
 		t.Fatalf("must drop the oldest: %d..%d", h[0].Revision, h[len(h)-1].Revision)
 	}
 }
+
+func TestSpecOmitsAddedReplicaDependencies(t *testing.T) {
+	a := app(t, "")
+	a.DependsOn = types.DependsOnConfig{"db": {Condition: "service_started"}, "db-app": {Condition: "service_started"}, "cache-app": {Condition: "service_started"}}
+	b := a
+	b.DependsOn = types.DependsOnConfig{"db": {Condition: "service_started"}, "cache-app": {Condition: "service_started"}}
+	_, ha, _ := Encode(a)
+	_, hb, _ := Encode(b)
+	if ha != hb || len(a.DependsOn) != 3 {
+		t.Fatal("only the S-app entry next to S is dropped, on a copy")
+	}
+}

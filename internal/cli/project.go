@@ -96,6 +96,7 @@ func (c composeScaler) ScaleUp(ctx context.Context, app types.ServiceConfig, tot
 		app.Deploy = &d
 	}
 	app.SetScale(total)
+	app.DependsOn = nil                                  // its dependencies are converged and disabled here
 	app.CustomLabels = p.Services[app.Name].CustomLabels // a restored spec has none
 	app.PullPolicy = types.PullPolicyNever               // prePull is the only pull
 	p.Services[app.Name] = app
