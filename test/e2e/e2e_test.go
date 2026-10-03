@@ -3,7 +3,10 @@
 package e2e
 
 import (
+	"encoding/json"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -202,6 +205,69 @@ func mapsEqual(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+// echo is what the app's /headers saw, through the proxy.
+type echo struct {
+	Header http.Header `json:"header"`
+	Host   string      `json:"host"`
+}
+
+func headersVia(t *testing.T, url string, h map[string]string) echo {
+	t.Helper()
+	req, _ := http.NewRequest("GET", url, nil)
+	for k, v := range h {
+		req.Header.Set(k, v)
+	}
+	res, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var e echo
+	if err := json.NewDecoder(res.Body).Decode(&e); err != nil {
+		t.Fatal(err)
+	}
+	return e
+}
+
+// xff splits X-Forwarded-For into its addresses.
+func xff(e echo) []string {
+	var out []string
+	for _, a := range strings.Split(e.Header.Get("X-Forwarded-For"), ",") {
+		out = append(out, strings.TrimSpace(a))
+	}
+	return out
+}
+
+func TestForwardedHeaders(t *testing.T) {
+	port := freePort(t)
+	p := project(t, api(port, 1, fast))
+	p.mustUp()
+	u := url(port, "/headers")
+
+	direct := headersVia(t, u, nil)
+	if a := xff(direct); len(a) != 1 || net.ParseIP(a[0]) == nil {
+		t.Errorf("direct: X-Forwarded-For %q, want the caller's address", direct.Header.Get("X-Forwarded-For"))
+	}
+	if got := direct.Header.Get("X-Forwarded-Proto"); got != "http" {
+		t.Errorf("direct: X-Forwarded-Proto %q, want http", got)
+	}
+	if want := fmt.Sprintf("127.0.0.1:%d", port); direct.Host != want {
+		t.Errorf("direct: Host %q, want %q", direct.Host, want)
+	}
+
+	// A TLS-terminating proxy in front.
+	behind := headersVia(t, u, map[string]string{"X-Forwarded-Proto": "https", "X-Forwarded-For": "203.0.113.7", "X-Request-Id": "req-1"})
+	if a := xff(behind); len(a) != 2 || a[0] != "203.0.113.7" || net.ParseIP(a[1]) == nil {
+		t.Errorf("behind a proxy: X-Forwarded-For %q, want 203.0.113.7 plus the caller's address", behind.Header.Get("X-Forwarded-For"))
+	}
+	if got := behind.Header.Get("X-Forwarded-Proto"); got != "https" {
+		t.Errorf("behind a proxy: X-Forwarded-Proto %q, want https kept", got)
+	}
+	if got := behind.Header.Get("X-Request-Id"); got != "req-1" {
+		t.Errorf("behind a proxy: X-Request-Id %q, want req-1 kept", got)
+	}
 }
 
 func TestReplicaChangeScalesWithoutBounce(t *testing.T) {

@@ -1,9 +1,11 @@
 // Command app is the e2e test workload: / answers hostname and VERSION,
-// /health fails on demand, /slow?s=N holds a request open.
+// /health fails on demand, /slow?s=N holds a request open, /headers echoes
+// the request headers, Host and RemoteAddr as JSON.
 package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -34,6 +36,9 @@ func main() {
 	})
 	mux.HandleFunc("/env", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, os.Getenv(r.URL.Query().Get("k")))
+	})
+	mux.HandleFunc("/headers", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"header": r.Header, "host": r.Host, "remote_addr": r.RemoteAddr})
 	})
 	srv := &http.Server{Addr: ":8080", Handler: mux}
 	if p := os.Getenv("PORT"); p != "" {

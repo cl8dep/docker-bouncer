@@ -55,6 +55,12 @@ func Bootstrap(svc config.Service) string {
 				"typed_config": obj{
 					"@type":       "type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager",
 					"stat_prefix": name,
+					// Append the caller's address to X-Forwarded-For. One trusted hop keeps
+					// an incoming X-Forwarded-Proto (a TLS proxy in front sets https)
+					// instead of overwriting it with the plain-HTTP scheme of this hop.
+					"use_remote_address":           true,
+					"xff_num_trusted_hops":         1,
+					"preserve_external_request_id": true,
 					"http_filters": []any{obj{
 						"name":         "envoy.filters.http.router",
 						"typed_config": obj{"@type": "type.googleapis.com/envoy.extensions.filters.http.router.v3.Router"},

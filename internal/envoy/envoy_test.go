@@ -25,6 +25,7 @@ func TestBootstrapListenersRoutesAndAdmin(t *testing.T) {
 		`"name":"port-8080"`, `"name":"port-9090"`, // listeners
 		`"cluster":"port-8080"`, `"timeout":"0s"`,
 		`"validate_clusters":false`,
+		`"use_remote_address":true`, `"xff_num_trusted_hops":1`, `"preserve_external_request_id":true`,
 		`"retry_on":"connect-failure,refused-stream,reset-before-request"`,
 		`"num_retries":3`, `envoy.retry_host_predicates.previous_hosts`,
 		`"path":"/etc/bouncer/dyn/cds.json"`, `"watched_directory":{"path":"/etc/bouncer/dyn"}`,
