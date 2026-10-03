@@ -28,7 +28,7 @@ mkdir -p ~/.docker/cli-plugins
 curl -fsSL -o ~/.docker/cli-plugins/docker-bouncer \
   "https://github.com/cuza/docker-bouncer/releases/latest/download/docker-bouncer-$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
 chmod +x ~/.docker/cli-plugins/docker-bouncer
-docker bouncer --help
+docker bouncer --version
 ```
 
 Checksums are in each release's `SHA256SUMS`. From source:
