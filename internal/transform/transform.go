@@ -4,6 +4,7 @@ package transform
 
 import (
 	"fmt"
+	"maps"
 	"sort"
 	"strconv"
 	"time"
@@ -56,6 +57,23 @@ func Apply(in *types.Project) (*Result, error) {
 		p.Services[name] = proxy(svc, *bs)
 		p.Services[app] = replicas(svc)
 		out = append(out, *bs)
+	}
+	// A dependent of Service S also depends on S-app, so stop and down stop it
+	// before S's replicas, not only before S's proxy.
+	for name, svc := range p.Services {
+		var deps types.DependsOnConfig
+		for _, bs := range out {
+			if d, ok := svc.DependsOn[bs.Name]; ok {
+				if deps == nil {
+					deps = maps.Clone(svc.DependsOn) // shared with in's service
+				}
+				deps[AppName(bs.Name)] = d
+			}
+		}
+		if deps != nil {
+			svc.DependsOn = deps
+			p.Services[name] = svc
+		}
 	}
 	return &Result{Project: &p, Services: out}, nil
 }

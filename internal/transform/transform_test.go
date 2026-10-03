@@ -1,6 +1,7 @@
 package transform
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -116,5 +117,39 @@ func TestProxyDefinitionStableAcrossHealthConfig(t *testing.T) {
 	ports.Services["api"] = api
 	if proxyYAML(ports) == base {
 		t.Fatal("a port change must change the proxy")
+	}
+}
+
+func TestDependentsAlsoDependOnReplicas(t *testing.T) {
+	in := project()
+	in.Services["api"] = func(s types.ServiceConfig) types.ServiceConfig {
+		s.DependsOn = types.DependsOnConfig{"worker": {Condition: "service_started", Required: true}}
+		return s
+	}(in.Services["api"])
+	db := types.ServiceConfig{Name: "web", Extensions: types.Extensions{"x-bouncer": map[string]any{}}}
+	db.Image = "registry/web@sha256:3"
+	db.Expose = types.StringOrNumberList{"80"}
+	dep := types.ServiceDependency{Condition: "service_healthy", Restart: true, Required: true}
+	db.DependsOn = types.DependsOnConfig{"api": dep}
+	in.Services["web"] = db
+	r, err := Apply(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := r.Project.Services
+	if w := s["worker"].DependsOn; len(w) != 2 || !reflect.DeepEqual(w["api-app"], w["api"]) {
+		t.Fatalf("plain dependent: %v", w)
+	}
+	if a := s["web-app"].DependsOn; len(a) != 2 || !reflect.DeepEqual(a["api"], dep) || !reflect.DeepEqual(a["api-app"], dep) {
+		t.Fatalf("replica dependent: %v", a)
+	}
+	if a := s["api-app"].DependsOn; len(a) != 1 || a["worker"].Condition != "service_started" {
+		t.Fatalf("a dependency on a plain service gets nothing added: %v", a)
+	}
+	if s["web"].DependsOn != nil || s["api"].DependsOn != nil {
+		t.Fatal("proxies get no depends_on")
+	}
+	if len(in.Services["worker"].DependsOn) != 1 || len(in.Services["web"].DependsOn) != 1 {
+		t.Fatal("the input project must not change")
 	}
 }

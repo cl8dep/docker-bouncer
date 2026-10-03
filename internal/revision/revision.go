@@ -126,6 +126,19 @@ func Strip(app types.ServiceConfig) (types.ServiceConfig, error) {
 			out.Deploy = nil
 		}
 	}
+	// The S-app entries transform adds next to each depends_on S only order
+	// stop and down; they are not part of the spec.
+	if app.DependsOn != nil {
+		out.DependsOn = types.DependsOnConfig{}
+		for k, v := range app.DependsOn {
+			if base, ok := strings.CutSuffix(k, transform.AppName("")); ok {
+				if _, added := app.DependsOn[base]; added {
+					continue
+				}
+			}
+			out.DependsOn[k] = v
+		}
+	}
 	// Revision labels are bookkeeping, not part of the spec; every other
 	// label is (a label change is a change).
 	out.Labels = types.Labels{}
