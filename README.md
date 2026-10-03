@@ -12,7 +12,7 @@ proxy in front of each service and health-gated bounces, as a Docker CLI plugin.
 - **Zero-downtime deploys for Compose on one host.** Change the image, run
   `docker bouncer up`, and new replicas take traffic only once healthy while
   old ones drain.
-- **Kubernetes-style Services, PaaSTA-style bounces.** A stable address
+- **Kubernetes-style Services, [PaaSTA](https://github.com/yelp/paasta)-style bounces.** A stable address
   (name, ports, aliases) in front of the healthy replicas, and four bounce
   methods: `crossover`, `upthendown`, `downthenup`, `brutal`.
 - **No control plane, no state store.** Every run reads the compose file,
