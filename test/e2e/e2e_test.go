@@ -3,10 +3,12 @@
 package e2e
 
 import (
+	"bufio"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -513,6 +515,40 @@ func TestUndoAndUndoOfUndo(t *testing.T) {
 		if rev := fmt.Sprint(3 + i); top[0] != rev || top[1] != "*" || top[3] != "bouncer-e2e-app:"+want {
 			t.Fatalf("after undo %d history top %q, want revision %s of %s", i+1, top, rev, want)
 		}
+	}
+}
+
+// The cron case: the file is unchanged but its tag now names another image.
+// up bounces to it, the replicas keep the tag, and undo runs the old image
+// again by its ID.
+func TestMovedTagBounces(t *testing.T) {
+	port := freePort(t)
+	tag := fmt.Sprintf("bouncer-e2e-app:moving-%d", port)
+	docker(t, "tag", "bouncer-e2e-app:v1", tag)
+	t.Cleanup(func() { exec.Command("docker", "rmi", tag).Run() })
+	p := project(t, strings.Replace(api(port, 1, fast+`, drain_method_params: { delay: 1s }`), "bouncer-e2e-app:v1", tag, 1))
+	p.mustUp()
+	p.mustUp()
+	if h := p.history("api"); len(h) != 1 {
+		t.Fatalf("an unchanged image is no new revision: %q", h)
+	}
+	docker(t, "tag", "bouncer-e2e-app:v2", tag)
+	p.mustUp()
+	if body := mustGet(t, url(port, "/")); !strings.Contains(body, "v2") {
+		t.Fatalf("after the tag moved GET / = %q, want v2", body)
+	}
+	if img := p.images("api"); img[tag] != 1 || len(img) != 1 {
+		t.Fatalf("replicas run %v, want the tag as written", img)
+	}
+	h := p.history("api")
+	if v2 := docker(t, "image", "inspect", "-f", "{{.Id}}", "bouncer-e2e-app:v2")[len("sha256:"):][:12]; len(h) != 2 || !strings.Contains(h[0], tag+" ("+v2+")") {
+		t.Fatalf("a moved tag is a new revision showing its image: %q", h)
+	}
+	if out, code := p.bouncer("undo"); code != 0 {
+		t.Fatalf("undo: %d\n%s", code, out)
+	}
+	if body := mustGet(t, url(port, "/")); !strings.Contains(body, "v1") {
+		t.Fatalf("after undo GET / = %q, want v1", body)
 	}
 }
 
@@ -1117,5 +1153,54 @@ services:
 	}
 	if ids := p.containers("com.docker.compose.project=" + p.name); len(ids) != 0 {
 		t.Fatalf("down --profile database left %v", ids)
+	}
+}
+
+// upgrade does a raw HTTP/1.1 upgrade through the proxy and, on 101, checks
+// that bytes sent come back. It returns the response status.
+func upgrade(t *testing.T, port int, typ string) int {
+	t.Helper()
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	fmt.Fprintf(conn, "GET /ws HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: %s\r\n"+
+		"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n", typ)
+	br := bufio.NewReader(conn)
+	res, err := http.ReadResponse(br, nil)
+	if err != nil {
+		t.Fatalf("%s: %v", typ, err)
+	}
+	if res.StatusCode != http.StatusSwitchingProtocols {
+		return res.StatusCode
+	}
+	// The RFC 6455 example key and its accept value.
+	if typ == "websocket" && res.Header.Get("Sec-WebSocket-Accept") != "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=" {
+		t.Errorf("%s: Sec-WebSocket-Accept %q", typ, res.Header.Get("Sec-WebSocket-Accept"))
+	}
+	for _, msg := range []string{"ping", "pong"} {
+		if _, err := io.WriteString(conn, msg); err != nil {
+			t.Fatal(err)
+		}
+		got := make([]byte, len(msg))
+		if _, err := io.ReadFull(br, got); err != nil || string(got) != msg {
+			t.Fatalf("%s: echo %q %v, want %q", typ, got, err, msg)
+		}
+	}
+	return res.StatusCode
+}
+
+// WebSockets pass by default, a type listed in upgrade_types passes, and any
+// other upgrade gets Envoy's 403.
+func TestUpgradesPassThroughProxy(t *testing.T) {
+	port := freePort(t)
+	p := project(t, api(port, 1, fast+`, upgrade_types: [DERP]`))
+	p.mustUp()
+	for typ, want := range map[string]int{"websocket": 101, "derp": 101, "h2c-nope": 403} {
+		if got := upgrade(t, port, typ); got != want {
+			t.Errorf("Upgrade: %s got %d, want %d", typ, got, want)
+		}
 	}
 }
