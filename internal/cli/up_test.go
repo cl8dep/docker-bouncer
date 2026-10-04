@@ -20,7 +20,10 @@ import (
 	"github.com/docker/compose/v5/pkg/api"
 )
 
-type fakeEngine struct{ reps []engine.Replica }
+type fakeEngine struct {
+	reps []engine.Replica
+	id   string // ImageID's answer; "sha256:<ref>" when empty
+}
 
 func (f *fakeEngine) Replicas(context.Context, string, string) ([]engine.Replica, error) {
 	return f.reps, nil
@@ -34,6 +37,12 @@ func (f *fakeEngine) Exec(context.Context, string, []string, ...string) (string,
 	return "", nil
 }
 func (f *fakeEngine) Wait(context.Context, string, time.Duration) {}
+func (f *fakeEngine) ImageID(_ context.Context, ref string) (string, error) {
+	if f.id != "" {
+		return f.id, nil
+	}
+	return "sha256:" + ref, nil
+}
 
 func fakeLoaded(t *testing.T) *loaded {
 	t.Helper()
@@ -61,6 +70,26 @@ func TestDesiredAppReusesRunningRevision(t *testing.T) {
 	}
 	if _, leaked := l.Derived.Project.Services["api-app"].Labels[revision.LabelRevision]; leaked {
 		t.Fatal("desiredApp must not write into the derived project")
+	}
+}
+
+// A built Service's replicas run the image ID, so a rebuild is a new revision.
+func TestDesiredAppPinsBuiltImage(t *testing.T) {
+	svc := service("api", "", "", true)
+	svc.Build = &types.BuildConfig{Context: "."}
+	l := derive(t, svc)
+	l.Engine = &fakeEngine{}
+	app, err := desiredApp(context.Background(), l, l.Derived.Services[0], "u1")
+	if err != nil || app.Image != "sha256:proj-api" {
+		t.Fatalf("image %q %v", app.Image, err)
+	}
+	l.Engine.(*fakeEngine).reps = []engine.Replica{{Name: "proj-api-app-1", Running: true, Labels: app.Labels}}
+	if again, _ := desiredApp(context.Background(), l, l.Derived.Services[0], "u2"); again.Labels[revision.LabelRevision] != "1" {
+		t.Fatal("the same image is the same revision")
+	}
+	l.Engine.(*fakeEngine).id = "sha256:rebuilt"
+	if next, _ := desiredApp(context.Background(), l, l.Derived.Services[0], "u3"); next.Labels[revision.LabelRevision] != "2" || next.Image != "sha256:rebuilt" {
+		t.Fatalf("a rebuilt image is a new revision: %v %q", next.Labels[revision.LabelRevision], next.Image)
 	}
 }
 
@@ -141,5 +170,30 @@ func TestUpProjectScopesToNamedServices(t *testing.T) {
 	var se dockercli.StatusError
 	if _, err := upProject(l, []string{"nope"}); !errors.As(err, &se) || se.StatusCode != 2 {
 		t.Fatalf("unknown service: %v, want exit 2", err)
+	}
+}
+
+// down takes inactive Services' proxies and replicas, never inactive plain services.
+func TestDownProject(t *testing.T) {
+	api := service("api", "registry/api:1", "", true)
+	api.Profiles = []string{"database"}
+	api.DependsOn = types.DependsOnConfig{"db": {Condition: "service_started"}}
+	db := service("db", "registry/db:1", "", false)
+	db.Profiles = []string{"database"}
+	p := &types.Project{Name: "proj", Services: types.Services{"web": service("web", "registry/web:1", "", false)},
+		DisabledServices: types.Services{"api": api, "db": db}}
+	d, err := transform.Apply(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := downProject(d)
+	if !slices.Equal(got.ServiceNames(), []string{"api", "api-app", "web"}) || !slices.Equal(got.DisabledServiceNames(), []string{"db"}) {
+		t.Fatalf("services %v disabled %v", got.ServiceNames(), got.DisabledServiceNames())
+	}
+	if _, ok := got.Services["api-app"].DependsOn["db"]; ok {
+		t.Fatal("an edge to a disabled service must go")
+	}
+	if len(d.Project.Services) != 1 || len(d.Project.Services["web"].DependsOn) != 0 || d.Project.DisabledServices["api-app"].DependsOn["db"].Condition == "" {
+		t.Fatal("the derived project must not change")
 	}
 }
