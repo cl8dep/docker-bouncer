@@ -26,6 +26,9 @@ func undoCmd(dockerCli command.Cli, pf *ProjectFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := checkFormat(ctx, dockerCli, l, true, pf.IgnoreFormat); err != nil {
+				return err
+			}
 			defer l.show(ctx, "undo")()
 			if len(args) > 0 && len(selected(l.Derived.Services, args)) == 0 {
 				return configErr("%s is not a Service", args[0])
@@ -40,7 +43,7 @@ func undoCmd(dockerCli command.Cli, pf *ProjectFlags) *cobra.Command {
 				if cur == nil {
 					continue
 				}
-				h, err := revision.History(cur)
+				h, err := readHistory(cur)
 				if err != nil {
 					return Exit(1, fmt.Errorf("%s: %w", svc.Name, err))
 				}
@@ -106,7 +109,7 @@ func undoCmd(dockerCli command.Cli, pf *ProjectFlags) *cobra.Command {
 					}
 					p := plans[svc.Name]
 					// A concurrent up may have moved history since the target was picked.
-					h, err := revision.History(cur)
+					h, err := readHistory(cur)
 					if err != nil {
 						return types.ServiceConfig{}, err
 					}
@@ -116,6 +119,9 @@ func undoCmd(dockerCli command.Cli, pf *ProjectFlags) *cobra.Command {
 					app, kept, err := revision.Stamp(p.app, cur, upID, svc.Spec.HistoryMax, time.Now())
 					app.Image = runImage(p.app) // the spec keeps the reference; the replicas run the exact image
 					if err == nil {
+						inv := l.inv
+						inv.Command, inv.Revision = "undo", p.target.Revision // refresh holds the Service here
+						stamp(&app, inv)
 						warnTrimmed(l, svc, kept)
 						l.event("Service "+svc.Name, api.Warning, fmt.Sprintf("Revision %s = copy of %d:", app.Labels[revision.LabelRevision], p.target.Revision),
 							fmt.Sprintf("the compose file still describes revision %d, the next up rolls forward", p.file))
