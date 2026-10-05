@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -80,7 +81,7 @@ func undoCmd(dockerCli command.Cli, pf *ProjectFlags) *cobra.Command {
 				// missing, an image ID no registry serves must still be local.
 				run := app
 				run.Image = runImage(app)
-				if err := undoImageCheck(svc.Name, target.Revision, app.Image, run, imagePresent(dockerCli)(ctx, run.Image)); err != nil {
+				if err := undoImageCheck(svc.Name, target.Revision, app.Image, run, imagePresent(dockerCli)(ctx, run.Image, run.Platform)); err != nil {
 					return Exit(1, err)
 				}
 				pulls[app.Name] = run
@@ -117,7 +118,7 @@ func undoCmd(dockerCli command.Cli, pf *ProjectFlags) *cobra.Command {
 						return types.ServiceConfig{}, fmt.Errorf("%s: revisions changed while undo started; run it again", svc.Name)
 					}
 					app, kept, err := revision.Stamp(p.app, cur, upID, svc.Spec.HistoryMax, time.Now())
-					app.Image = runImage(p.app) // the spec keeps the reference; the replicas run the exact image
+					runExact(&app, p.app)
 					if err == nil {
 						inv := l.inv
 						inv.Command, inv.Revision = "undo", p.target.Revision // refresh holds the Service here
@@ -149,6 +150,19 @@ func restore(l *loaded, svc config.Service, e revision.Entry) (types.ServiceConf
 	file := l.Derived.Project.Services[app.Name]
 	app.SetScale(file.GetScale())
 	return app, nil
+}
+
+// runExact makes app, stamped from the stored revision spec, run that
+// revision's exact image, as do its pre_start hooks that inherited the
+// service's image; the spec keeps the reference.
+func runExact(app *types.ServiceConfig, spec types.ServiceConfig) {
+	app.Image = runImage(spec)
+	app.PreStart = slices.Clone(app.PreStart)
+	for i := range app.PreStart {
+		if app.PreStart[i].Image == spec.Image { // inherited from the service
+			app.PreStart[i].Image = app.Image
+		}
+	}
 }
 
 // fileRevision is the newest stored revision the compose file describes; the

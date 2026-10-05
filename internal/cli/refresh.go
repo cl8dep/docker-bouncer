@@ -35,7 +35,7 @@ type refreshOptions struct {
 	progress       string
 	timestamps     bool
 	ignoreFormat   bool
-	present        func(context.Context, string) bool
+	present        func(ctx context.Context, image, platform string) bool
 	registryDigest func(ctx context.Context, ref string) (string, error)
 }
 
@@ -127,6 +127,9 @@ func bouncerProjects(ctx context.Context, c client.APIClient) (map[string]hostPr
 	}
 	out := map[string]hostProject{}
 	for _, ct := range res.Items {
+		if !transform.IsReplica(ct.Labels) {
+			continue
+		}
 		name := ct.Labels[api.ProjectLabel]
 		hp, seen := out[name]
 		up, best := ct.Labels[revision.LabelUpID], hp.labels[revision.LabelUpID] // UTC timestamps
@@ -388,7 +391,7 @@ func composeState(ctx context.Context, dockerCli command.Cli, project string) (m
 // returns those that now name another image. Digest references can't move;
 // build: services are not rebuilt by refresh; pull_policy never and build are
 // honoured.
-func refreshPull(ctx context.Context, l *loaded, targets types.Services, present func(context.Context, string) bool) ([]string, error) {
+func refreshPull(ctx context.Context, l *loaded, targets types.Services, present func(ctx context.Context, image, platform string) bool) ([]string, error) {
 	pulls := types.Services{}
 	before := map[string]string{}
 	for n, s := range targets {
